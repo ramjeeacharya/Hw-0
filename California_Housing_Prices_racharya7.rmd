@@ -1,0 +1,407 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# California Housing Prices
+
+## 1.  Overview
+
+This is about the California median Housing Prices of 1990 of California districts. This data is available at https://www.kaggle.com/camnugent/california-housing-prices. There are different variables on which the housing prices depend upon, but here in this dataset we have nine variables. There are ten variables altogether including the outcome one. The outcome (dependent) variable is median_house_value (median price of house), and rest of the variables are the attributes of the outcome variable. The summary of the data gives us the datatypes of each variable and sheds some light into the dataset itself. The summary is as follows
+
+
+``` {r, echo = FALSE}
+dat<-read.csv("https://raw.githubusercontent.com/ramjeeacharya/dataset/master/housing.csv")
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+# Getting the feel of data
+
+head(dat) # To see some rows of the dataset
+
+nrow(dat) # To see how many rows are there in the dataset
+
+summary(dat) # Seeing the summary of the data
+
+# Structure of data
+
+str(dat)
+
+```
+
+It is the data of 20640 blocks in California, where each row belongs to a block. We have longitude, latitude, housing median age (housing_median_age), total rooms (total_rooms), population, households, median income (median_income), median house value (median_house_value), and ocean proximity (ocean_proximity) of each block of housing. All variables are predictors except 'median_house_value', where the median_house_value is the outcome (dependent) variable. All variables are numeric, except for ocean_proximity, which is a categorical variable describing each block how far it is from the ocean. It has five categories values, where each of the values are obvious by its label, and it shows some blocks are in island, as ocean_proximity’s label is 'Island'. The label '<1H OCEAN' signifies that the given block in the dataset is less than an hour drive from the ocean. The summary of the dataset you saw above gives you the feel of the data. There are 207 NA's in the variable 'total_bedrooms'. Except ocean_proximity, all other variables are numeric. Longitude is in negative numbers since the area lies in the West of Prime Meridian.
+
+The goal of this project is to find a best model which can predict the median house value in best way possible. In other words, it is finding a model which has least RMSE (Root Mean Square Error), which I have defined in the following section. At first, I will be using linear regression then different methods available in train function to estimate the RMSE. For each model I will estimate RMSE because we know that the smaller the RMSE, the better the model is in predicting the median house value. I will finally use advanced machine learning techniques to estimate the RMSE.
+
+
+## 2. Methods
+
+There are 207 NAs in total_bedrooms column, and I will remove those corresponding rows. As we have good number of observations, removing them will not make much difference in our estimates/results.
+
+Next thing, I want to do is introducing dummy variables for the categorical variable, ocean_proximity so that I could use this variable for calculating the correlation coefficients with the outcome variable, and with other independent variables. Dummy variable is set to 1 for the category we are setting dummy for, and 0 otherwise. The five dummy variables are Inland, Near_Ocean, Near_Bay, Island and Less_One_Hr. They are the dummies for those housings which are at inland, near to ocean, near to bay, at Island, and in less than an hour drive from ocean, respectively. Let’s observe the correlations among different variables.
+
+
+``` {r, echo = FALSE}
+# Examining correlations between variables
+dat <- na.omit(dat)
+
+# Introducing dummy variables for the categories present in 'ocean_proximity' column, since I 
+# could not use the factor variable to calculate the correlation coefficient
+# Dummy variable is 1 if given condition is satisfied, 0 otherwise
+
+# Creating dummies and appending them into the dataset as new columns
+
+inlnd <-  ifelse(dat$ocean_proximity == "INLAND", 1, 0) # setting inlnd = 1 if its 1, 0 otherwise
+dat <- dat %>% mutate(Inland = inlnd) # Appending the new column 'Inland' into the dataset
+
+nr_ocn <-  ifelse(dat$ocean_proximity == "NEAR OCEAN", 1, 0) # Setting 1 for houses near ocean, 0 otherwise
+dat <- dat %>% mutate(Near_Ocean = nr_ocn) # Appending Near_Ocean column into the dataset
+
+nr_bay <-  ifelse(dat$ocean_proximity == "NEAR BAY", 1, 0) # Setting 1 for hosues neary bay, 0 otherwise
+dat <- dat %>% mutate(Near_Bay = nr_bay)
+
+islnd <-  ifelse(dat$ocean_proximity == "ISLAND", 1, 0) # Setting 1 for houses on Island, 0 otherwise
+dat <- dat %>% mutate(Island = islnd)
+
+on_hr <-  ifelse(dat$ocean_proximity == "<1H OCEAN", 1, 0) # Setting 1 for houses within an hour of driving to ocean, 0 otherwise
+dat <- dat %>% mutate(Less_One_Hr = on_hr)
+
+
+
+# Categorizing the remainder of each independent variable into 100 differnt groups before partitioning
+# the data to be able to use advanced machine learning later
+
+dat <- dat %>% mutate(per_md_incm = ntile(median_income, 100))
+
+dat <- dat %>% mutate(per_ttl_rms = ntile(total_rooms, 100))
+
+dat <- dat %>% mutate(per_hs_md_age = ntile(housing_median_age, 100))
+
+dat <- dat %>% mutate(per_hhs = ntile(households, 100))
+
+dat <- dat %>% mutate(per_ttl_bdrms = ntile(total_bedrooms, 100))
+
+dat <- dat %>% mutate(per_lat = ntile(latitude, 100))
+
+dat <- dat %>% mutate(per_longt = ntile(longitude, 100))
+dat <- dat %>% mutate(per_popn = ntile(population, 100))
+
+
+# setting seed so that result remains same in each execution
+# set set.seed(1), if R is 3.5 or earlier 
+set.seed(1, sample.kind = "Rounding")
+
+# creating data partition so that we have as much data as possible for training
+# and enough data for testing as well
+
+train_index <- createDataPartition(dat$median_house_value, times = 1, p = 0.9, list = FALSE)
+train_set <- dat[train_index, ] 
+test_set <- dat[-train_index, ] 
+
+# Examining correlations among variables
+
+cols <- c(1:9, 11:15)
+# Picking only needed columns for calculating the correlation
+cor(train_set[cols])
+# Distribution of median_ house_value based on ocean_proximity
+
+
+```
+
+The dependent variable, median_house_value is positively correlated with housing_median_age, total_rooms, total_bedrooms, households, median_income, Near_Ocean, Near_Bay, Island and Less_One_Hr. The positive relationship means the direction of relationship between two variables are in the same direction, i.e. if one increases then the next also increases and vice-versa. For example, the more the total_rooms, the higher the median house value in the block, and so on. The negative correlation exists between the outcome and these variables: longitude, latitude, population and Inland, i.e. the relationship is in negative direction. For example, if the house is at inland, its value is lower.
+
+The correlations between four different predictors are stronger than among the others. The correlation between total_rooms, total_bedrooms, population and households are really high, and these variables will be combined into some principal components for the analysis if time permits. This positive correlations make sense since more total_rooms means more total_bedrooms, more people and more households.
+
+I create additional column in the dataset by dividing data in a hundred different categories one for each independent variable:  longitude, latitude, housing_median_age, total_rooms, total_bedrooms, population, households and median_income. These additional columns will help us in using advanced machine learning . 
+
+
+Let us see the distribution of median house value (median_house_value) as per the ocean proximity (ocean_proximity
+
+
+``` {r, echo = FALSE}
+ # Distribution of median_house_value based on ocean_proximity
+
+boxplot(median_house_value ~ ocean_proximity, data = train_set)
+
+```
+
+The above boxplot shows the median value of houses on island are highest among all categories, whereas the median value of houses at inland is lowest, and other categories fall in-between.
+
+
+
+From the dataset we know we can predict the median housing value using the predictors given there. To do so, first, I will run linear regression and estimate RMSE. We know the lower the RMSE, the better is the model in predicting the outcome variable. Then I will use other machine learning techniques like glm (generalized linear model), knn (k-nearest neighbors), rpart (in short, regression trees) available in train function. Each model is for predicting the outcome variable, and based on that prediction we can calculate the RMSE which is defined as
+
+
+``` {r, echo = TRUE}
+RMSE  <- function(predicted, true_value) {
+  
+  sqrt(mean((predicted - true_value)^2))
+  
+}  
+```
+, where the true_value is the median_house_value in the test_set, since we have two sets of datasets after partitioning the given dataset: one for training our models, the train_set, and the next set is the test_set to evaluate the performance of our model. The predicted values are values predicted from the model in the test dataset, and RMSE is the square root of the mean of squared difference between the predicted and true values.
+
+Then I will use advanced machine learning technique like I learned in machine learning course for movie rating system. The crux of machine learning is to train models using train dataset, and use the trained model to predict the outcome variable in the test dataset. First, I will assume the predicted median house value is the average of all median house values present in the train dataset.  I will calculate RMSE based on that predicted value comparing that value with the median house value present in the test dataset. I will build on this algorithm by adding an additional independent variable at a time. The first independent variable I will add on the algorithm is median_income. To make use of median_income variable easier in this machine learning technique, I have its category variable, per_md_incm. Such categorization is justified since each such category impacts the prediction of median house value in different amounts and helps to improve the prediction. The same logic applies for the categorization of other independent variables down the road. I will use per_md_incm variable in estimating its values for different category of it (from train dataset) by taking the mean of the difference between median_house_value and the average (average of median_house_value). For detail, you can see the code in the results section below. Now, using the average and these different category values of median_income, I predict the median_house_values using the test dataset. Again, I calculate RMSE from those predicted values and its corresponding observed values in the test dataset. We keep on adding one independent variable after other in the algorithm since each one is correlated with the outcome variable. Then, I compare RMSE of the different algorithms, and the one with the least RMSE is the best for predicting the median house value. 
+
+
+
+
+## 3. Results
+
+As we know we have to predict the median_house_value, and other variables present in the dataset are its attributes. Let us run a simple linear regression. The RMSE calculated from linear regression model is 67007. The RMSEs calculated using the train functions using different methods are all higher than what we got from simple linear regression model. The highest RMSE we got is from Knn method. Thus far, the simple linear regression model has the lowest RMSE, 67007. See the code for how different techniques are used for the results.
+
+``` {r, echo = FALSE}
+# Running a linear regression
+fit <-  lm(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, data = train_set )
+# To display the summary of the regression result
+summary(fit)
+# Predicting the outcome based on test_set
+yhat <- predict(fit, newdata = test_set)
+# Estimating RMSE for this linear model
+RMSE_lm <- RMSE(yhat, test_set$median_house_value)
+
+# Creating a data frame named rmse_results to store RMSEs from different models
+rmse_results <- data_frame(method = "RMSE_lm", RMSEs = RMSE_lm)
+
+
+# ***************Running other models for RMSE estimations ********************************************************
+
+train_lm <- train(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, method = "lm", data = train_set)
+
+# Picking RMSE from above method
+RMSE_lm_t <- train_lm$results$RMSE
+
+# Adding next RMSE in the rmse_results
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="RMSE from train_lm",
+                                     RMSEs = RMSE_lm_t ))
+
+# RMSE  for linear regression is  68936
+
+# glm model
+train_glm <- train(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, method = "glm", data = train_set)
+
+RMSE_glm <- train_glm$results$RMSE
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="RMSE_glmm",
+                                     RMSEs = RMSE_glm ))
+
+# RMSE for glm is  69149
+
+# knn method
+train_knn <- train(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, method = "knn", data = train_set)
+
+RMSE_knn <- train_knn$results$RMSE[which.min(train_knn$results$RMSE)]
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="RMSE from Knn",
+                                     RMSEs = RMSE_knn ))
+
+# The lowest RMSE is 100710
+
+# Defining control parameters for knn method
+control <- trainControl(method = "cv", number = 10, p = .9)
+train_knn_cv <- train(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, method = "knn", 
+                      data = train_set,
+                      tuneGrid = data.frame(k = seq(1, 15, 1)),
+                      trControl = control)
+
+RMSE_knn_cv <- train_knn_cv$results$RMSE[which.min(train_knn_cv$results$RMSE)]
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="RMSE from Knn_cv",
+                                     RMSEs = RMSE_knn_cv ))
+
+#RMSE 95263.00
+
+# Rpart method
+train_rpart <- train(median_house_value ~ total_rooms + total_bedrooms + housing_median_age + population + households + median_income + longitude + latitude + ocean_proximity, method = "rpart", data = train_set)
+RMSE_rpart <- train_rpart$results$RMSE[which.min(train_rpart$results$RMSE)]
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="RMSE from Rpart",
+                                     RMSEs = RMSE_rpart))
+
+#  Optimal is cp = 0.05895141, and the corresponding RMSE is 85233
+
+
+
+```
+All RMSEs calculated by far are listed below
+
+
+``` {r, echo = FALSE}
+rmse_results
+
+```
+Now, let us design the algorithm on our own and see how RMSE fares. First of all, assuming the predicted median_house_value is the average of all median_house_value present in the train dataset. Now let us see how RMSE does in this case. The RMSE is 116,141 in this case. Let us keep on adding one independent variable after other and see how RMSE changes. The RMSE kept on decreasing as we kept on adding additional independent variable each time.
+
+``` {r, echo = TRUE}
+
+# Using mu as the predicted median_house_value
+
+mu <- mean(train_set$median_house_value)
+RMSE1 <- RMSE(mu, test_set$median_house_value)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Mean only",
+                                     RMSEs = RMSE1 ))
+rmse_results
+# RMSE1 is 116140.7
+
+# Including median_income's category variable in the process
+
+# Estimating incm_i for each category per_md_incm, a category variable for median_income variable
+md_incm_avg <- train_set %>% group_by(per_md_incm)  %>% 
+  summarise(incm_i= mean( median_house_value - mu))
+
+# Predicting from the test_set, based on the above estimation, from the train_set
+predicted <- mu + test_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  .$incm_i
+
+
+RMSE2 <- RMSE(predicted, test_set$median_house_value)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Mean plus median income avg",
+                                     RMSEs = RMSE2 ))
+rmse_results
+# RMSE2 is 80046.91
+
+ # Adding ocean_proximity in the process
+ocn_avgs <- train_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  group_by(ocean_proximity) %>%
+  summarize(b_ocn = mean(median_house_value - mu - incm_i))
+
+
+predicted<- test_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by='ocean_proximity') %>%
+  mutate(pred = mu + incm_i + b_ocn) %>%
+  .$pred
+
+RMSE3 <- RMSE(predicted, test_set$median_house_value)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Mean, median income avg and ocn_proximity",
+                                     RMSEs = RMSE3 ))
+rmse_results
+# RMSE3 is 70854.93
+
+# Adding latitude's category variable in the process
+lat_avgs <- train_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by = 'ocean_proximity') %>%
+  group_by(per_lat) %>%
+  summarize(b_lat = mean(median_house_value - mu - incm_i- b_ocn))
+
+
+predicted <- test_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by='ocean_proximity') %>%
+  left_join(lat_avgs, by = 'per_lat') %>%
+  mutate(pred = mu  + incm_i + b_ocn +  b_lat) %>%
+  .$pred
+
+RMSE4 <- RMSE(predicted, test_set$median_house_value)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Mean, median income avg, ocn_proximity and latitude",
+                                     RMSEs = RMSE4))
+rmse_results
+# RMSE4 is 66491.92
+
+
+# Adding household median age in the process
+md_age_avgs <- train_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by = 'ocean_proximity') %>%
+  left_join(lat_avgs, by = 'per_lat') %>%
+  group_by(per_hs_md_age) %>%
+  summarize(b_md_age = mean(median_house_value - mu - incm_i- b_ocn- b_lat))
+
+
+predicted <- test_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by='ocean_proximity') %>%
+  left_join(lat_avgs, by = 'per_lat') %>%
+  left_join(md_age_avgs, by ='per_hs_md_age') %>%
+  mutate(pred = mu  + incm_i + b_ocn +  b_lat + b_md_age) %>%
+  .$pred
+
+RMSE5 <- RMSE(predicted, test_set$median_house_value)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Mean, median incone avg, ocn_proximity, latitue and housing median age",
+                                     RMSEs = RMSE5 ))
+rmse_results
+# RMSE5 is 65010.69
+
+# Using regularization
+
+lambdas <- seq(0, 25, 0.5) # setting lambda's sequence value
+rmses <- sapply(lambdas, function(x){
+  incm_i <- train_set %>%
+    group_by(per_md_incm) %>%
+    summarize(incm_i = sum(median_house_value - mu)/(n()+x))
+  b_ocn <- train_set %>% 
+    left_join(incm_i, by="per_md_incm") %>%
+    group_by(ocean_proximity) %>%
+    summarize(b_ocn = sum(median_house_value - incm_i - mu)/(n()+x))
+  
+  b_lat <- train_set %>% 
+    left_join(md_incm_avg, by = 'per_md_incm') %>%
+    left_join(ocn_avgs, by = 'ocean_proximity') %>%
+    group_by(per_lat) %>%
+    summarize(b_lat = sum(median_house_value - mu - incm_i- b_ocn)/(n()+x))
+
+b_md_age <- train_set %>% 
+  left_join(md_incm_avg, by='per_md_incm') %>%
+  left_join(ocn_avgs, by = 'ocean_proximity') %>%
+  left_join(lat_avgs, by = 'per_lat') %>%
+  group_by(per_hs_md_age) %>%
+  summarize(b_md_age = sum(median_house_value - mu - incm_i- b_ocn- b_lat)/(n()+x))
+  
+  predicted <- test_set %>% 
+    left_join(incm_i, by = 'per_md_incm') %>%
+    left_join(b_ocn, by = 'ocean_proximity') %>%
+    left_join(b_lat, by = 'per_lat') %>%
+    left_join(b_md_age, by ='per_hs_md_age') %>%
+    mutate(pred = mu + incm_i + b_ocn + b_lat + b_md_age) %>%
+    .$pred
+  return(RMSE(predicted, test_set$median_house_value))
+})
+
+qplot(lambdas, rmses)  # Q-Plot
+
+lambda <- lambdas[which.min(rmses)] # Optimal lambda
+lambda # Printing out Optimal lambda, and it is 18.5
+RMSE_reg <- rmses[which.min(rmses)] # minimum rmses, and it is 64509.01
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method=" Reg_RMSE",
+                                     RMSEs = RMSE_reg ))
+rmse_results
+# Displaying all stored RMSEs by far in its descending order
+rmse_results %>% arrange(desc(RMSEs))
+
+```
+We saw the RMSE calculated using independent variables median_income, ocean_proximity, latitude, housing_median_age did best in terms of minimizing the RMSE. To make the model further better I used regularization to penalize the volatile estimates. So, the model using those four independent variables plus the regularization is the best predicting model for median_house_value among all the models we tried. The lowest RMSE we got from this model is 64,509.
+
+## 4. Conclusion
+
+Hence, I used different models to predict the median house value in California. I used linear regression, glm, knn, rpart methods to estimate RMSE, and I found linear regression model performed best among these. After that I wrote different algorithms adding additional independent variable at a time, and the more independent variable I added, the better the model performed in terms of minimizing the RMSE. Using regularization made the model even better and brought the RMSE down to 64,509. I have plan to include all other independent variables from the dataset in the best model I have so far.  
+
+Using this algorithm, we can predict the median house value in California, and using this algorithm we can predict the housing prices in other regions, too. Same technique used here can be used in other dataset where regression analysis could be used for prediction. This is not the perfect model, since there are yet other independent variables to be included from the dataset in the algorithm. 
+
+In the future I will include all the predictors in the algorithms so that the algorithm will be better. I will collect additional variables’  data if possible, since the housing value also depends on crime rates, quality of school in the neighborhood and so on. As you have seen these predictors in our dataset have explained 64% percent of variation in the outcome variable as it is shown by R^2^ in the linear regression model. Last but not the least, I will borrow cloud computation from the internet to run 'Random Forest' and 'Rborist' methods present in train function, since these methods took forever for my computer to run upon, and I had to abort the executions in the middle of processings.
+
+In addition to that I will use Principal Component Analysis (PCA) to reduce the number of predictors and use other relevant algorithms to reduce the RMSE further down. I will look into the data to find out why the older houses likely to have more median house values than the new ones.
+
+
+
+
